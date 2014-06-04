@@ -36,7 +36,7 @@ def sparsedecomp(A,LB,LC):
         M += abs(i)
     for i in LB:
         M += abs(i)
-#print M
+
         
     MC = cp.symbolic(cv.sparse(M), p=cv.amd.order)
     
@@ -184,7 +184,7 @@ def SDPsolver(A, B = [], b = [], C = [], c = []):
     #print 'b is: ', b
     #print 'C is: ', C
     #print 'c is: ', c
-    
+    print 'starting SDP solver...'
     from cvxopt import solvers
     start = time.time()
     # Decomposition of matrices A,B,C according to sparsity pattern
@@ -196,44 +196,82 @@ def SDPsolver(A, B = [], b = [], C = [], c = []):
     for i,cl in enumerate(C):
         s = cl.size[0]
         C[i] = cv.sparse(cl+cl.trans()-cv.spmatrix(cv.matrix(cl[::s+1]),range(s),range(s)))
-        
     s = A.size[0]
     A = cv.sparse(A+A.trans()-cv.spmatrix(cv.matrix(A[::s+1]),range(s),range(s)))
-    
-    
-    
+    print 'symmetry check done...'    
+        
+    print 'start sparse decomposition...'
     dA, dB, dC, P, E, H = sparsedecomp(A,B,C)
+    print 'sparse decomposition finished...'
     I = decomp_index(dA)
     # Transforms list of matrices to list of vectors with matrices in column-first order
-    myc = reformSDP(dA)
+    print 'start reforming the matrices into new objective function, in-/equality matrices...'
     
-    if dB != []:
+    print 'generate objective function...'
+    myc = reformSDP(dA)
 
+    NB = len(dB)
+    print 'starting equality constraints...'
+    print 'total of %d matrices to reform...' %NB
+    if dB != []:
         myA = copy(myc)
+        iib = 0
         for cl in dB:
+            print 'starting %d of %d matrices of equality constraints B...'% (iib,NB)
+            iib +=1
             a = reformSDP(cl)
             myA = cv.matrix([[myA],[a]])
         myA = cv.sparse(myA[::,1::].trans())
         myb = cv.matrix(b, tc='d')
+        
         if E!= []:
-            for i in E:
-                myA = cv.matrix([myA,i])
-            myb = cv.matrix([cv.matrix(b),H])
+            
+            
+            print 'fix equlity constrints inbetween  decomposed matrices'
+            NE = len(E)
+            print 'total of %d matrices to reform...'%NE
+            iie = 0
+            mE = cv.spmatrix([],[],[],(myA.size[1],NE))
+            for e,i in enumerate(E):
+                print 'starting %d of %d matrices of equality constraints E...'% (iie,NE)
+                iie+=1
+                x = int(i[0])
+                y = int(i[1])
+                mE[x,e] = 1
+                mE[y,e] = -1
+            myA = cv.sparse([myA,mE.trans()])
+            myb = cv.sparse([cv.matrix(b),H])
     else:
         if E!= []:
-            myA = copy(myc).trans()
-            for i in E:
-                myA = cv.matrix([myA,i])
-            myA = cv.sparse(myA[1::,::])
+            print 'fix equlity constrints inbetween  decomposed matrices'
+            NE = len(E)
+            print 'total of %d matrices to reform...'%NE
+            iie = 0
+            mE = cv.spmatrix([],[],[],(myA.size[1],NE))
+            for e,i in enumerate(E):
+                print 'starting %d of %d matrices of equality constraints E...'% (iie,NE)
+                iie+=1
+                x = int(i[0])
+                y = int(i[1])
+                mE[x,e] = 1
+                mE[y,e] = -1
+            myA = cv.sparse([myA,mE.trans()])
             myb = H
         else:
             myA = []
             myb = []
 
+    NC = len(dC)
+    print 'starting equality constraints...'
+    print 'total of %d matrices to reform...' %NC
+
     if dC != []:    
         
         myGl = copy(myc)
+        iic = 0
         for cl in dC:
+            print 'starting %d of %d matrices of inequality constraints C...'% (iic,NC)
+            iic +=1
             g = reformSDP(cl)
             myGl = cv.matrix([[myGl],[g]])
         myGl = cv.sparse(myGl[::,1::].trans())
@@ -245,12 +283,15 @@ def SDPsolver(A, B = [], b = [], C = [], c = []):
     myG, myh = psd_cond(dA)
     
     e1 = time.time()- start
- 
+    
+    print 'finished reformation...'
+    print 'starting solver...'
+    print 'size of myb: ', myb.size
     if myA and myGl:
         print 'A ok'
         print 'myGl ok'
         start = time.time()
-        sol = solvers.sdp(c = myc, A = myA, b  = myb, Gs = myG,  hs = myh, Gl = myGl, hl = myg)
+        sol = solvers.sdp(c = myc, A = myA, b  = cv.matrix([myb]), Gs = myG,  hs = myh, Gl = myGl, hl = myg)
         elapsed = time.time()-start
     elif not myA and myGl:
         print 'A not ok'
@@ -262,7 +303,7 @@ def SDPsolver(A, B = [], b = [], C = [], c = []):
         print 'A ok'
         print 'myGl not ok'
         start = time.time()
-        sol = solvers.sdp(c = myc,A=myA, b=myb, Gs=myG, hs=myh)
+        sol = solvers.sdp(c = myc,A=myA, b  = cv.matrix([myb]), Gs=myG, hs=myh)
         elapsed = time.time()-start
     else:
         print 'A not ok'
@@ -320,23 +361,25 @@ def eq_const(AC):
         N.append(N[i]+(len(c)**2+len(c))/2)
     
     # make tuple out of separators with true indices according to cliques
-    E = []
+    E = list()
     for cc, pc in enumerate(AC.parent()):
         if pc != -1:
             C = AC.cliques()[cc]
             P = AC.cliques()[pc]
             S = AC.separators()[cc]
             
-            T = []
+            T = list()
             for i in S:
                 T.append([C.index(i),P.index(i)])
-            
-            e = []                    
+                             
             for i,x in enumerate(T):
                 for y in T[:i+1:]:
-                    e = cv.spmatrix([],[],[],(1,N[-1]))
-                    e[0,N[cc] + ind(x[0],y[0],len(C))] =  1
-                    e[0,N[pc] + ind(x[1],y[1],len(P))] = -1
+                    e = cv.matrix(0,(1,2))
+                    e[0] = N[cc] + ind(x[0],y[0],len(C))
+                    e[1] = N[pc] + ind(x[1],y[1],len(P))
+                    #e = cv.spmatrix([],[],[],(1,N[-1]))
+                    #e[0,N[cc] + ind(x[0],y[0],len(C))] =  1
+                    #e[0,N[pc] + ind(x[1],y[1],len(P))] = -1
                     E.append(e)
     
     if E != []:

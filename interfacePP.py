@@ -8,16 +8,17 @@ def getY(SYS):
     # assumption: bus numbers start at 1,...,n
     N = len(SYS['bus'][::,0])
     Y = cv.spmatrix([],[],[],(N,N), tc='z')
-    
     for e,i in enumerate(SYS['branch'][::,0]):
-        i = int(i-1)                    #index of 'from' - line
-        j = int(SYS['branch'][e,1]-1)   #index of 'to' - line
-        Y[i,j] = -1/(SYS['branch'][e,2] +1j*SYS['branch'][e,3])-1j/2*SYS['branch'][e,4]
-        Y[j,i] = Y[i,j]
+        j = int(SYS['branch'][e,1])   #bus of 'to' - line
+        ind_i = int(np.where(SYS['bus'][::,0]==i)[0][0] -1)
+        ind_j = int(np.where(SYS['bus'][::,0]==j)[0][0] -1)
+        Y[ind_i,ind_j] = -1/(SYS['branch'][e,2] +1j*SYS['branch'][e,3])-1j/2*SYS['branch'][e,4]
+        Y[ind_j,ind_i] = Y[ind_i,ind_j]
         
     for e in range(N):
         Y[e,e] = -sum(Y[e,::])+SYS['bus'][e,4]+1j*SYS['bus'][e,5]
     return Y
+
     
 def getyk(Y,k):
     # generates matrix Y_k, admittance matrix with only k-th row.
